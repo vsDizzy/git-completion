@@ -1,0 +1,338 @@
+name: Publish to WinGet
+run-name: publish-winget
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version to publish
+        required: true
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    env:
+      PACKAGE_ID: vsDizzy.GitCompletion
+      PACKAGE_NAME: GitCompletion
+      PUBLISHER: vsDizzy
+      MONIKER: git-completion
+      WINGET_REPO: vsDizzy/winget-pkgs
+      WINGET_UPSTREAM: microsoft/winget-pkgs
+      SOURCE_REPO: ${{ github.repository }}
+      VERSION_INPUT: ${{ inputs.version }}
+
+    steps:
+      - name: Normalize version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${VERSION_INPUT#v}"
+
+          if [[ -z "$VERSION" ]]; then
+            echo "Version is empty."
+            exit 1
+          fi
+
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "Unsupported version format: $VERSION"
+            exit 1
+          fi
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
+
+      - name: Validate GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_RELEASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RELEASE="$(gh release view "$TAG" \
+            --repo "$SOURCE_REPO" \
+            --json isDraft,isPrerelease,tagName,url)"
+
+          if [[ "$(jq -r '.isDraft' <<< "$RELEASE")" == "true" ]]; then
+            echo "Release $TAG is a draft."
+            exit 1
+          fi
+
+          if [[ "$(jq -r '.isPrerelease' <<< "$RELEASE")" == "true" ]]; then
+            echo "Release $TAG is a pre-release."
+            exit 1
+          fi
+
+          echo "$RELEASE"
+
+      - name: Download MSI
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_RELEASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/msi"
+
+          gh release download "$TAG" \
+            --repo "$SOURCE_REPO" \
+            --pattern "*.msi" \
+            --dir "$RUNNER_TEMP/msi"
+
+          mapfile -t MSI_FILES < <(
+            find "$RUNNER_TEMP/msi" \
+              -maxdepth 1 \
+              -type f \
+              -name '*.msi'
+          )
+
+          if [[ "${#MSI_FILES[@]}" -ne 1 ]]; then
+            echo "Expected exactly one MSI asset, found ${#MSI_FILES[@]}:"
+            printf '%s\n' "${MSI_FILES[@]}"
+            exit 1
+          fi
+
+          MSI_PATH="${MSI_FILES[0]}"
+          MSI_NAME="$(basename "$MSI_PATH")"
+          MSI_SHA256="$(sha256sum "$MSI_PATH" | awk '{print toupper($1)}')"
+
+          echo "MSI_PATH=$MSI_PATH" >> "$GITHUB_ENV"
+          echo "MSI_NAME=$MSI_NAME" >> "$GITHUB_ENV"
+          echo "MSI_SHA256=$MSI_SHA256" >> "$GITHUB_ENV"
+
+      - name: Build installer URL
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          INSTALLER_URL="https://github.com/${SOURCE_REPO}/releases/download/${TAG}/${MSI_NAME}"
+
+          echo "INSTALLER_URL=$INSTALLER_URL" >> "$GITHUB_ENV"
+
+      - name: Clone WinGet fork
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_RELEASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git clone \
+            --depth 1 \
+            --single-branch \
+            "https://x-access-token:${GH_TOKEN}@github.com/${WINGET_REPO}.git" \
+            winget-pkgs
+
+          cd winget-pkgs
+
+          git remote add upstream \
+            https://github.com/microsoft/winget-pkgs.git
+
+          git fetch --depth 1 upstream master
+
+          git checkout -b \
+            "vsdizzy-gitcompletion-${VERSION}" \
+            upstream/master
+
+      - name: Check version is not already published
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MANIFEST_DIR="manifests/v/vsDizzy/GitCompletion/${VERSION}"
+
+          if git -C winget-pkgs ls-tree -d --name-only upstream/master "$MANIFEST_DIR" | grep -q .; then
+            echo "Package version already exists in microsoft/winget-pkgs:"
+            echo "$MANIFEST_DIR"
+            exit 1
+          fi
+
+      - name: Generate manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MANIFEST_DIR="winget-pkgs/manifests/v/vsDizzy/GitCompletion/${VERSION}"
+          mkdir -p "$MANIFEST_DIR"
+
+          cat > "$MANIFEST_DIR/vsDizzy.GitCompletion.yaml" <<EOF
+          # yaml-language-server: \$schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
+          PackageIdentifier: vsDizzy.GitCompletion
+          PackageVersion: ${VERSION}
+          DefaultLocale: en-US
+          ManifestType: version
+          ManifestVersion: 1.12.0
+          EOF
+
+          cat > "$MANIFEST_DIR/vsDizzy.GitCompletion.installer.yaml" <<EOF
+          # yaml-language-server: \$schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+          PackageIdentifier: vsDizzy.GitCompletion
+          PackageVersion: ${VERSION}
+          Installers:
+            - Architecture: x64
+              InstallerType: msi
+              Scope: user
+              InstallerUrl: ${INSTALLER_URL}
+              InstallerSha256: ${MSI_SHA256}
+          ManifestType: installer
+          ManifestVersion: 1.12.0
+          EOF
+
+          cat > "$MANIFEST_DIR/vsDizzy.GitCompletion.locale.en-US.yaml" <<EOF
+          # yaml-language-server: \$schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+          PackageIdentifier: vsDizzy.GitCompletion
+          PackageVersion: ${VERSION}
+          PackageLocale: en-US
+          Publisher: vsDizzy
+          PackageName: GitCompletion
+          Moniker: git-completion
+          PackageUrl: https://github.com/${SOURCE_REPO}
+          License: MIT
+          ShortDescription: Git completion for Windows PowerShell
+          Description: Git command, branch, and option completion for Windows PowerShell.
+          ManifestType: defaultLocale
+          ManifestVersion: 1.12.0
+          EOF
+
+      - name: Validate generated files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MANIFEST_DIR="winget-pkgs/manifests/v/vsDizzy/GitCompletion/${VERSION}"
+
+          echo "MANIFEST_DIR=$MANIFEST_DIR"
+
+          ls -la "$MANIFEST_DIR"
+
+          echo "Checking manifest files..."
+          test -f "$MANIFEST_DIR/vsDizzy.GitCompletion.yaml"
+          test -f "$MANIFEST_DIR/vsDizzy.GitCompletion.installer.yaml"
+          test -f "$MANIFEST_DIR/vsDizzy.GitCompletion.locale.en-US.yaml"
+
+          echo "Checking PackageIdentifier..."
+          grep -Fq "PackageIdentifier: vsDizzy.GitCompletion" \
+            "$MANIFEST_DIR/vsDizzy.GitCompletion.yaml"
+
+          echo "Checking PackageVersion..."
+          grep -Fq "PackageVersion: ${VERSION}" \
+            "$MANIFEST_DIR/vsDizzy.GitCompletion.yaml"
+
+          echo "Checking InstallerType..."
+          grep -Fq "InstallerType: msi" \
+            "$MANIFEST_DIR/vsDizzy.GitCompletion.installer.yaml"
+
+          echo "Checking Scope..."
+          grep -Fq "Scope: user" \
+            "$MANIFEST_DIR/vsDizzy.GitCompletion.installer.yaml"
+
+          echo "Checking InstallerUrl..."
+          grep -Fq "InstallerUrl: ${INSTALLER_URL}" \
+            "$MANIFEST_DIR/vsDizzy.GitCompletion.installer.yaml"
+
+          echo "Checking InstallerSha256..."
+          grep -Fq "InstallerSha256: ${MSI_SHA256}" \
+            "$MANIFEST_DIR/vsDizzy.GitCompletion.installer.yaml"
+
+          echo "Checking Moniker..."
+          grep -Fq "Moniker: git-completion" \
+            "$MANIFEST_DIR/vsDizzy.GitCompletion.locale.en-US.yaml"
+
+          echo "Checking whitespace..."
+          git -C winget-pkgs diff --check
+
+      - name: Check existing open pull request
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_RELEASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BRANCH="vsdizzy-gitcompletion-${VERSION}"
+
+          EXISTING_PR="$(
+            gh pr list \
+              --repo "$WINGET_UPSTREAM" \
+              --head "vsDizzy:${BRANCH}" \
+              --state open \
+              --json url \
+              --jq '.[0].url // empty'
+          )"
+
+          if [[ -n "$EXISTING_PR" ]]; then
+            echo "An open pull request already exists:"
+            echo "$EXISTING_PR"
+            exit 1
+          fi
+
+      - name: Commit and push to fork
+        shell: bash
+        working-directory: winget-pkgs
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "manifests/v/vsDizzy/GitCompletion/${VERSION}"
+
+          git commit \
+            -m "New version: vsDizzy.GitCompletion version ${VERSION}"
+
+          git push origin "vsdizzy-gitcompletion-${VERSION}"
+
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_RELEASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BRANCH="vsdizzy-gitcompletion-${VERSION}"
+
+          PR_URL="$(
+            gh pr create \
+              --repo "$WINGET_UPSTREAM" \
+              --base master \
+              --head "vsDizzy:${BRANCH}" \
+              --title "New version: vsDizzy.GitCompletion version ${VERSION}" \
+              --body "$(cat <<EOF
+          ## Summary
+
+          New release of \`vsDizzy.GitCompletion\` version \`${VERSION}\`.
+
+          - Package: \`vsDizzy.GitCompletion\`
+          - Version: \`${VERSION}\`
+          - Installer: \`${MSI_NAME}\`
+          - Scope: \`user\`
+          - Moniker: \`git-completion\`
+          - SHA256: \`${MSI_SHA256}\`
+          - Release: https://github.com/${SOURCE_REPO}/releases/tag/${TAG}
+
+          Generated and validated by the GitHub Actions release workflow.
+          EOF
+          )"
+          )"
+
+          echo "PR_URL=$PR_URL" >> "$GITHUB_ENV"
+          echo "$PR_URL"
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## WinGet publish"
+            echo
+            echo "- Package: \`vsDizzy.GitCompletion\`"
+            echo "- Version: \`${VERSION}\`"
+            echo "- Installer: \`${MSI_NAME}\`"
+            echo "- Scope: \`user\`"
+            echo "- Moniker: \`git-completion\`"
+            echo "- SHA256: \`${MSI_SHA256}\`"
+            echo "- Fork branch: https://github.com/${WINGET_REPO}/tree/vsdizzy-gitcompletion-${VERSION}"
+            echo "- Pull request: ${PR_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"

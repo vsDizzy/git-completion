@@ -1,0 +1,393 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="GitCompletion"
+    Version="$(var.ProductVersion)"
+    Manufacturer="vsDizzy"
+    UpgradeCode="DA7C9758-BA8C-CE46-CF91-5C7913F2F124"
+    Scope="perUser">
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Launch
+      Condition="POWERSHELL5_EXE OR PWSH_EXE"
+      Message="GitCompletion requires Windows PowerShell 5.1 or PowerShell 7." />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A later version of [ProductName] is already installed."
+      AllowSameVersionUpgrades="yes" />
+
+    <!--
+      Detect the supported PowerShell installations.
+
+      PowerShell 7 is supported when the standard 64-bit installation
+      contains pwsh.exe in %ProgramFiles%\PowerShell\7.
+
+      Windows PowerShell 5.1 is supported when the standard system
+      installation contains powershell.exe.
+    -->
+    <Property Id="PWSH_EXE" Secure="yes">
+      <DirectorySearch
+        Id="PwshDir"
+        Path="[ProgramFiles64Folder]PowerShell\7"
+        Depth="0">
+        <FileSearch
+          Id="PwshFile"
+          Name="pwsh.exe" />
+      </DirectorySearch>
+    </Property>
+
+    <Property Id="POWERSHELL5_EXE" Secure="yes">
+      <DirectorySearch
+        Id="Ps5Dir"
+        Path="[System64Folder]WindowsPowerShell\v1.0"
+        Depth="0">
+        <FileSearch
+          Id="Ps5File"
+          Name="powershell.exe" />
+      </DirectorySearch>
+    </Property>
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="VsDizzyFolder" Name="vsDizzy">
+
+        <!-- PowerShell module files only. -->
+        <Directory Id="INSTALLFOLDER" Name="GitCompletion">
+
+          <Component
+            Id="MainModule"
+            Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+
+            <CreateFolder />
+
+            <RegistryValue
+              Root="HKCU"
+              Key="Software\vsDizzy\GitCompletion"
+              Name="Installed"
+              Type="integer"
+              Value="1"
+              KeyPath="yes" />
+
+            <File
+              Id="GitCompletionPsd1"
+              Source="../src/GitCompletion.psd1" />
+
+            <File
+              Id="GitCompletionPsm1"
+              Source="../src/GitCompletion.psm1" />
+
+            <RemoveFolder
+              Id="RemoveInstallFolder"
+              On="uninstall" />
+
+          </Component>
+        </Directory>
+
+        <!-- Installer-only PowerShell scripts. -->
+        <Directory Id="SETUPFOLDER" Name="GitCompletionSetup">
+
+          <Component
+            Id="InstallerScripts"
+            Guid="6F1D7B5A-8B7F-4D67-9A48-2C1D5F9E3A71">
+
+            <RegistryValue
+              Root="HKCU"
+              Key="Software\vsDizzy\GitCompletion"
+              Name="InstallerScripts"
+              Type="integer"
+              Value="1"
+              KeyPath="yes" />
+
+            <File
+              Id="InstallLinksPs1"
+              Source="../setup/Install-Links.ps1" />
+
+            <File
+              Id="UninstallLinksPs1"
+              Source="../setup/Uninstall-Links.ps1" />
+
+            <File
+              Id="RegisterProfilesPs1"
+              Source="../setup/Register-Profiles.ps1" />
+
+            <RemoveFolder
+              Id="RemoveSetupFolder"
+              On="uninstall" />
+
+          </Component>
+        </Directory>
+
+        <!-- Remove the parent vsDizzy folder after its children are removed. -->
+        <Component
+          Id="VsDizzyFolderCleanup"
+          Guid="C3D4E5F6-A789-0123-CDEF-123456789012">
+
+          <CreateFolder Directory="VsDizzyFolder" />
+
+          <RegistryValue
+            Root="HKCU"
+            Key="Software\vsDizzy\GitCompletion"
+            Name="VsDizzyFolderCleanup"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+
+          <RemoveFolder
+            Id="RemoveVsDizzyFolder"
+            Directory="VsDizzyFolder"
+            On="uninstall" />
+
+        </Component>
+
+      </Directory>
+    </StandardDirectory>
+
+    <!--
+      Prefer PowerShell 7 as the host for shared link operations.
+      Fall back to Windows PowerShell 5.1 when PS7 is unavailable.
+    -->
+    <SetProperty
+      Id="PowerShellExe"
+      Value="[PWSH_EXE]"
+      Before="RunInstallLinks"
+      Sequence="execute"
+      Condition="PWSH_EXE &lt;&gt; &quot;&quot;"
+      Action="SetPowerShellExePs7" />
+
+    <SetProperty
+      Id="PowerShellExe"
+      Value="[POWERSHELL5_EXE]"
+      Before="RunInstallLinks"
+      Sequence="execute"
+      Condition="PWSH_EXE = &quot;&quot; AND POWERSHELL5_EXE &lt;&gt; &quot;&quot;"
+      Action="SetPowerShellExePs5" />
+
+    <SetProperty
+      Id="PowerShellExe"
+      Value="[PWSH_EXE]"
+      Before="RunUninstallLinks"
+      Sequence="execute"
+      Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND PWSH_EXE &lt;&gt; &quot;&quot;"
+      Action="SetPowerShellExeUninstallPs7" />
+
+    <SetProperty
+      Id="PowerShellExe"
+      Value="[POWERSHELL5_EXE]"
+      Before="RunUninstallLinks"
+      Sequence="execute"
+      Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND PWSH_EXE = &quot;&quot; AND POWERSHELL5_EXE &lt;&gt; &quot;&quot;"
+      Action="SetPowerShellExeUninstallPs5" />
+
+    <!--
+      Deferred WixQuietExec command lines.
+      The property Id must match the corresponding deferred CustomAction Id.
+    -->
+    <SetProperty
+      Id="RunInstallLinks"
+      Value="&quot;[PowerShellExe]&quot; -ExecutionPolicy Bypass -NonInteractive -NoProfile -File &quot;[SETUPFOLDER]Install-Links.ps1&quot; -InstallDir &quot;[INSTALLFOLDER]&quot;"
+      Before="RunInstallLinks"
+      Sequence="execute"
+      Condition="NOT REMOVE=&quot;ALL&quot;" />
+
+    <SetProperty
+      Id="RollbackInstallLinks"
+      Value="&quot;[PowerShellExe]&quot; -ExecutionPolicy Bypass -NonInteractive -NoProfile -File &quot;[SETUPFOLDER]Uninstall-Links.ps1&quot;"
+      Before="RollbackInstallLinks"
+      Sequence="execute"
+      Condition="NOT Installed" />
+
+    <SetProperty
+      Id="RunRegisterProfilesPs5"
+      Value="&quot;[POWERSHELL5_EXE]&quot; -ExecutionPolicy Bypass -NonInteractive -NoProfile -File &quot;[SETUPFOLDER]Register-Profiles.ps1&quot; -PowerShell5"
+      Before="RunRegisterProfilesPs5"
+      Sequence="execute"
+      Condition="NOT REMOVE=&quot;ALL&quot; AND POWERSHELL5_EXE &lt;&gt; &quot;&quot;" />
+
+    <SetProperty
+      Id="RollbackRegisterProfilesPs5"
+      Value="&quot;[POWERSHELL5_EXE]&quot; -ExecutionPolicy Bypass -NonInteractive -NoProfile -File &quot;[SETUPFOLDER]Register-Profiles.ps1&quot; -Unregister -PowerShell5"
+      Before="RollbackRegisterProfilesPs5"
+      Sequence="execute"
+      Condition="NOT Installed AND POWERSHELL5_EXE &lt;&gt; &quot;&quot;" />
+
+    <SetProperty
+      Id="RunRegisterProfilesPs7"
+      Value="&quot;[PWSH_EXE]&quot; -ExecutionPolicy Bypass -NonInteractive -NoProfile -File &quot;[SETUPFOLDER]Register-Profiles.ps1&quot; -PowerShell7"
+      Before="RunRegisterProfilesPs7"
+      Sequence="execute"
+      Condition="NOT REMOVE=&quot;ALL&quot; AND PWSH_EXE &lt;&gt; &quot;&quot;" />
+
+    <SetProperty
+      Id="RollbackRegisterProfilesPs7"
+      Value="&quot;[PWSH_EXE]&quot; -ExecutionPolicy Bypass -NonInteractive -NoProfile -File &quot;[SETUPFOLDER]Register-Profiles.ps1&quot; -Unregister -PowerShell7"
+      Before="RollbackRegisterProfilesPs7"
+      Sequence="execute"
+      Condition="NOT Installed AND PWSH_EXE &lt;&gt; &quot;&quot;" />
+
+    <!-- Shared junction operations. -->
+    <CustomAction
+      Id="RunInstallLinks"
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec"
+      Execute="deferred"
+      Impersonate="yes"
+      Return="check" />
+
+    <CustomAction
+      Id="RollbackInstallLinks"
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec"
+      Execute="rollback"
+      Impersonate="yes"
+      Return="ignore" />
+
+    <!--
+      Register the PS5 profile only when Windows PowerShell 5.1 exists.
+    -->
+    <CustomAction
+      Id="RunRegisterProfilesPs5"
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec"
+      Execute="deferred"
+      Impersonate="yes"
+      Return="check" />
+
+    <CustomAction
+      Id="RollbackRegisterProfilesPs5"
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec"
+      Execute="rollback"
+      Impersonate="yes"
+      Return="ignore" />
+
+    <!--
+      Register the PS7 profile only when PowerShell 7 exists.
+    -->
+    <CustomAction
+      Id="RunRegisterProfilesPs7"
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec"
+      Execute="deferred"
+      Impersonate="yes"
+      Return="check" />
+
+    <CustomAction
+      Id="RollbackRegisterProfilesPs7"
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec"
+      Execute="rollback"
+      Impersonate="yes"
+      Return="ignore" />
+
+    <!-- Immediate uninstall command lines. -->
+    <SetProperty
+      Id="WixQuietExecCmdLine"
+      Action="SetWixQuietExecCmdLineUninstallLinks"
+      Value="&quot;[PowerShellExe]&quot; -ExecutionPolicy Bypass -NonInteractive -NoProfile -File &quot;[SETUPFOLDER]Uninstall-Links.ps1&quot;"
+      Before="RunUninstallLinks"
+      Sequence="execute"
+      Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+
+    <CustomAction
+      Id="RunUninstallLinks"
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec"
+      Execute="immediate"
+      Impersonate="yes"
+      Return="ignore" />
+
+    <SetProperty
+      Id="WixQuietExecCmdLine"
+      Action="SetWixQuietExecCmdLineUnregisterProfilesPs5"
+      Value="&quot;[POWERSHELL5_EXE]&quot; -ExecutionPolicy Bypass -NonInteractive -NoProfile -File &quot;[SETUPFOLDER]Register-Profiles.ps1&quot; -Unregister -PowerShell5"
+      Before="RunUnregisterProfilesPs5"
+      Sequence="execute"
+      Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND POWERSHELL5_EXE &lt;&gt; &quot;&quot;" />
+
+    <CustomAction
+      Id="RunUnregisterProfilesPs5"
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec"
+      Execute="immediate"
+      Impersonate="yes"
+      Return="ignore" />
+
+    <SetProperty
+      Id="WixQuietExecCmdLine"
+      Action="SetWixQuietExecCmdLineUnregisterProfilesPs7"
+      Value="&quot;[PWSH_EXE]&quot; -ExecutionPolicy Bypass -NonInteractive -NoProfile -File &quot;[SETUPFOLDER]Register-Profiles.ps1&quot; -Unregister -PowerShell7"
+      Before="RunUnregisterProfilesPs7"
+      Sequence="execute"
+      Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND PWSH_EXE &lt;&gt; &quot;&quot;" />
+
+    <CustomAction
+      Id="RunUnregisterProfilesPs7"
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixQuietExec"
+      Execute="immediate"
+      Impersonate="yes"
+      Return="ignore" />
+
+    <InstallExecuteSequence>
+
+      <!--
+        Fresh install only rollback actions.
+        Repair intentionally has no rollback cleanup for external state.
+      -->
+      <Custom
+        Action="RollbackInstallLinks"
+        Before="RunInstallLinks"
+        Condition="NOT Installed" />
+
+      <Custom
+        Action="RollbackRegisterProfilesPs5"
+        Before="RunRegisterProfilesPs5"
+        Condition="NOT Installed AND POWERSHELL5_EXE &lt;&gt; &quot;&quot;" />
+
+      <Custom
+        Action="RollbackRegisterProfilesPs7"
+        Before="RunRegisterProfilesPs7"
+        Condition="NOT Installed AND PWSH_EXE &lt;&gt; &quot;&quot;" />
+
+      <!--
+        Install + Repair + new product during Major Upgrade.
+        Excluded from full uninstall.
+      -->
+      <Custom
+        Action="RunInstallLinks"
+        After="InstallFiles"
+        Condition="NOT REMOVE=&quot;ALL&quot;" />
+
+      <Custom
+        Action="RunRegisterProfilesPs5"
+        After="RunInstallLinks"
+        Condition="NOT REMOVE=&quot;ALL&quot; AND POWERSHELL5_EXE &lt;&gt; &quot;&quot;" />
+
+      <Custom
+        Action="RunRegisterProfilesPs7"
+        After="RunRegisterProfilesPs5"
+        Condition="NOT REMOVE=&quot;ALL&quot; AND PWSH_EXE &lt;&gt; &quot;&quot;" />
+
+      <!--
+        Normal uninstall only.
+        UPGRADINGPRODUCTCODE excludes removal of the old product during
+        a major upgrade.
+      -->
+      <Custom
+        Action="RunUninstallLinks"
+        Before="RemoveFiles"
+        Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+
+      <Custom
+        Action="RunUnregisterProfilesPs5"
+        After="RunUninstallLinks"
+        Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND POWERSHELL5_EXE &lt;&gt; &quot;&quot;" />
+
+      <Custom
+        Action="RunUnregisterProfilesPs7"
+        After="RunUnregisterProfilesPs5"
+        Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND PWSH_EXE &lt;&gt; &quot;&quot;" />
+
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

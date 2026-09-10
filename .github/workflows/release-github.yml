@@ -1,0 +1,91 @@
+name: Release to GitHub
+run-name: release-github
+
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT_PATH: installer/GitCompletion.wixproj
+  MSI_PATH: installer/bin/Release/GitCompletion.msi
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Read Version
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
+            throw "Invalid VERSION: $version"
+          }
+
+          "VERSION=$version" >> $env:GITHUB_ENV
+          "TAG=v$version" >> $env:GITHUB_ENV
+
+          Write-Host "Version: $version"
+          Write-Host "Tag: v$version"
+
+      - name: Restore
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Build MSI
+        run: dotnet build ${{ env.PROJECT_PATH }} -c Release --no-restore
+
+      - name: Verify MSI
+        shell: pwsh
+        run: |
+          if (-not (Test-Path '${{ env.MSI_PATH }}')) {
+            throw "MSI was not produced: ${{ env.MSI_PATH }}"
+          }
+
+          $file = Get-Item '${{ env.MSI_PATH }}'
+
+          Write-Host "MSI: $($file.FullName)"
+          Write-Host "Size: $($file.Length) bytes"
+
+      - name: Replace Tag
+        shell: bash
+        run: |
+          git tag -f "${TAG}"
+          git push -f origin "${TAG}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Replace Release
+        shell: bash
+        run: |
+          gh release delete "${TAG}" --yes 2>/dev/null || true
+
+          gh release create "${TAG}" \
+            "${MSI_PATH}" \
+            --title "GitCompletion ${TAG}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        shell: pwsh
+        run: |
+          @"
+          ## Release
+
+          - **Version:** ${{ env.VERSION }}
+          - **Tag:** ${{ env.TAG }}
+          - **MSI:** `${{ env.MSI_PATH }}
+          "@ >> $env:GITHUB_STEP_SUMMARY

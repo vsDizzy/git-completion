@@ -1,0 +1,18 @@
+<Project Sdk="WixToolset.Sdk/7.0.0">
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="7.0.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>GitCompletion</OutputName>
+    <AcceptEula>wix7</AcceptEula>
+
+    <ProductVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\VERSION').Trim())</ProductVersion>
+    <DefineConstants>ProductVersion=$(ProductVersion)</DefineConstants>
+
+    <SuppressIces>ICE61;ICE91</SuppressIces>
+  </PropertyGroup>
+
+</Project>
