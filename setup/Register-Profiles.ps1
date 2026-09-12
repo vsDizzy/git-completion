@@ -5,22 +5,34 @@
     PowerShell 5.1 and/or PowerShell 7 user profiles.
 
 .DESCRIPTION
-    Adds exactly this block to each selected user profile:
+    Adds or removes the following managed block from each selected user profile:
 
         # >>> GitCompletion BEGIN >>>
         Import-Module GitCompletion
         # <<< GitCompletion END <<<
 
-    PS 5.1:
+    The following user profile paths are supported:
+
+    Windows PowerShell 5.1:
         %USERPROFILE%\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1
 
-    PS 7:
+    PowerShell 7:
         %USERPROFILE%\Documents\PowerShell\Microsoft.PowerShell_profile.ps1
 
-    Registration is idempotent. Unregistration removes only the managed block.
+    Registration is idempotent. Unregistration removes only the managed
+    GitCompletion block and leaves all other profile content unchanged.
 
-    Existing file encoding is detected and preserved. New or empty files are
-    written as UTF-8 without BOM.
+    Existing UTF-8 and UTF-16 encodings detected from their BOM are preserved.
+    New or empty files are written as UTF-8 without BOM.
+
+.PARAMETER Unregister
+    Removes the GitCompletion block instead of adding it.
+
+.PARAMETER PowerShell5
+    Applies the operation to the Windows PowerShell 5.1 user profile.
+
+.PARAMETER PowerShell7
+    Applies the operation to the PowerShell 7 user profile.
 #>
 
 [CmdletBinding()]
@@ -33,17 +45,17 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $BeginMarker = '# >>> GitCompletion BEGIN >>>'
-$EndMarker   = '# <<< GitCompletion END <<<'
+$EndMarker = '# <<< GitCompletion END <<<'
 
 $Block = $BeginMarker + "`r`n" +
-    'Import-Module GitCompletion' + "`r`n" +
-    $EndMarker + "`r`n"
+'Import-Module GitCompletion' + "`r`n" +
+$EndMarker + "`r`n"
 
 $RemovePattern = '(?s)' +
-    [regex]::Escape($BeginMarker) +
-    '.*?' +
-    [regex]::Escape($EndMarker) +
-    '\r?\n?'
+[regex]::Escape($BeginMarker) +
+'.*?' +
+[regex]::Escape($EndMarker) +
+'\r?\n?'
 
 $Profiles = @()
 

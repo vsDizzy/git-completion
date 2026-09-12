@@ -1,3 +1,3 @@
 {
-  "recommendations": ["redhat.vscode-xml", "streetsidesoftware.code-spell-checker"]
+  "recommendations": ["ms-vscode.powershell", "redhat.vscode-xml", "streetsidesoftware.code-spell-checker"]
 }

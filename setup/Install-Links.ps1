@@ -1,21 +1,27 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Makes the GitCompletion module discoverable by both Windows PowerShell 5.1
-    and PowerShell 7 without copying the module files.
+    Registers the GitCompletion module in the user PowerShell module paths.
 
 .DESCRIPTION
-    The module is installed by the MSI to %LOCALAPPDATA%\vsDizzy\GitCompletion.
-    This script creates a directory junction (mklink /J) named GitCompletion in
-    each of the two user module paths so both PowerShell versions can find it
-    via Get-Module -ListAvailable. Works without administrator privileges.
+    The module is installed by the MSI to
+    %LOCALAPPDATA%\vsDizzy\GitCompletion.
 
-    Idempotent: a correct junction already in place is left untouched.
-    A junction pointing at the wrong target is replaced. A non-junction item
-    at the path is left alone with a warning.
+    This script creates directory junctions named GitCompletion in the
+    Windows PowerShell 5.1 and PowerShell 7 user module paths, allowing
+    both PowerShell versions to discover the installed module without
+    copying its files.
+
+    Works without administrator privileges.
+
+    The script is idempotent:
+    - An existing junction pointing to the correct module directory is left untouched.
+    - A junction pointing to a different directory is replaced.
+    - A non-junction item at the expected path is left untouched with a warning.
 
 .PARAMETER InstallDir
-    The actual module directory. Defaults to %LOCALAPPDATA%\vsDizzy\GitCompletion.
+    The directory containing the installed GitCompletion module.
+    Defaults to %LOCALAPPDATA%\vsDizzy\GitCompletion.
 #>
 [CmdletBinding()]
 param(
@@ -58,7 +64,7 @@ foreach ($ModulesDir in $ModulesDirs) {
                 continue
             }
 
-            cmd /c rmdir "`"$LinkPath`"" 2>&1 | Out-Null
+            Remove-Item -LiteralPath $LinkPath -Force
         }
         else {
             Write-Warning "'$LinkPath' exists but is not a junction. Leaving it untouched."
@@ -66,10 +72,11 @@ foreach ($ModulesDir in $ModulesDirs) {
         }
     }
 
-    $Output = cmd /c mklink /J "`"$LinkPath`"" "`"$InstallDir`"" 2>&1
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to create junction at '$LinkPath'. mklink output: $Output"
+    try {
+        New-Item -ItemType Junction -Path $LinkPath -Target $InstallDir -ErrorAction Stop | Out-Null
+    }
+    catch {
+        Write-Error "Failed to create junction at '$LinkPath': $($_.Exception.Message)"
         exit 1
     }
 }
