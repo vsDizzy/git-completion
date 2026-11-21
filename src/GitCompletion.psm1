@@ -1,8 +1,15 @@
 $git = Get-Command git -ErrorAction Stop
-$gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
+
+# Ask git itself where it is installed instead of deriving it from the path of
+# git.exe: that path may be a shim (scoop, winget links), and the runtime
+# prefix differs between Git for Windows builds (mingw64, ucrt64, clangarm64).
+# --exec-path prints <root>/<prefix>/libexec/git-core.
+$execPath = (& $git.Source --exec-path) -replace '/', '\'
+$prefix = Split-Path -Parent (Split-Path -Parent $execPath)
+$gitRoot = Split-Path -Parent $prefix
 
 $bash = Join-Path $gitRoot 'bin\bash.exe'
-$completion = Join-Path $gitRoot 'mingw64\share\git\completion\git-completion.bash'
+$completion = Join-Path $prefix 'share\git\completion\git-completion.bash'
 
 $helperScript = @'
 source "$1"
@@ -47,6 +54,22 @@ __git_main
 printf "%s\n" "${COMPREPLY[@]}"
 '@
 
+# bash reads the helper from a file. Piping it through stdin breaks in Windows
+# PowerShell when the console code page is UTF-8: a BOM is prepended and bash
+# fails on the first line.
+$helperFile = Join-Path ([System.IO.Path]::GetTempPath()) 'GitCompletion-helper.sh'
+$helperText = $helperScript -replace "`r`n", "`n"
+
+if (-not (Test-Path -LiteralPath $helperFile) -or
+    [System.IO.File]::ReadAllText($helperFile) -ne $helperText) {
+    [System.IO.File]::WriteAllText($helperFile, $helperText)
+}
+
+# Windows PowerShell and PowerShell 7 in Legacy mode drop empty-string
+# arguments to native commands, so the empty word being completed has to be
+# passed as explicit quotes.
+$emptyWord = if ((Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction Ignore) -in 'Standard', 'Windows') { '' } else { '""' }
+
 Register-ArgumentCompleter -Native -CommandName git -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
@@ -55,7 +78,7 @@ Register-ArgumentCompleter -Native -CommandName git -ScriptBlock {
     )
 
     if ($wordToComplete -eq '') {
-        $words += ''
+        $words += $emptyWord
     }
     else {
         $words[-1] = $wordToComplete
@@ -64,7 +87,7 @@ Register-ArgumentCompleter -Native -CommandName git -ScriptBlock {
     $cword = $words.Count - 1
     $line = $commandAst.ToString()
 
-    $output = $helperScript | & $bash -s -- `
+    $output = & $bash $helperFile `
         $completion `
         --cword $cword `
         --line $line `
