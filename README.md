@@ -26,11 +26,7 @@ GitCompletion simply lets PowerShell use **Git for Windows' own completion logic
 
 ## Installation
 
-Available through **WinGet**:
-
-```powershell
-winget install git-completion
-```
+Download `GitCompletion.msi` from the [latest release](https://github.com/vsDizzy/git-completion/releases/latest) and run it.
 
 The installation is **per-user**.
 
