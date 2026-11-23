@@ -51,6 +51,14 @@ Uninstalling GitCompletion removes the integration it installed.
 
 No additional PowerShell modules are required.
 
+## Releasing
+
+Versions and the changelog are managed with [Changesets](https://github.com/changesets/changesets).
+
+1. Add a changeset with every user-facing change: `npx changeset`.
+2. Merge the "Version Packages" pull request that the `Version` workflow opens on `main`. It bumps the version in `package.json` and updates `CHANGELOG.md`.
+3. Run the `Release to GitHub` workflow to build the MSI and publish the release.
+
 ## Limitations
 
 GitCompletion relies on implementation details of Git for Windows, including its bundled `bash.exe` and `git-completion.bash`.

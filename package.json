@@ -1,0 +1,14 @@
+{
+  "name": "git-completion",
+  "version": "0.1.2",
+  "private": true,
+  "description": "Native Git completion for PowerShell, powered by Git for Windows.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vsDizzy/git-completion"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.3"
+  }
+}

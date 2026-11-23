@@ -29,10 +29,14 @@ jobs:
       - name: Read Version
         shell: pwsh
         run: |
-          $version = (Get-Content VERSION -Raw).Trim()
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
 
-          if ($version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
-            throw "Invalid VERSION: $version"
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Invalid version in package.json: $version"
+          }
+
+          if (Get-ChildItem .changeset/*.md | Where-Object Name -ne 'README.md') {
+            throw 'Unreleased changesets found. Merge the "Version Packages" pull request first.'
           }
 
           "VERSION=$version" >> $env:GITHUB_ENV
@@ -67,6 +71,29 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Extract Release Notes
+        shell: pwsh
+        run: |
+          # Take this version's section out of the Changesets changelog.
+          $notes = @()
+          $found = $false
+
+          foreach ($line in Get-Content CHANGELOG.md) {
+            if ($line -match '^## ') {
+              if ($found) { break }
+              $found = $line.Trim() -eq "## $env:VERSION"
+              continue
+            }
+
+            if ($found) { $notes += $line }
+          }
+
+          if (-not $found) {
+            throw "CHANGELOG.md has no section for $env:VERSION"
+          }
+
+          ($notes -join "`n").Trim() | Set-Content release-notes.md -Encoding utf8
+
       - name: Replace Release
         shell: bash
         run: |
@@ -75,7 +102,7 @@ jobs:
           gh release create "${TAG}" \
             "${MSI_PATH}" \
             --title "GitCompletion ${TAG}" \
-            --generate-notes
+            --notes-file release-notes.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

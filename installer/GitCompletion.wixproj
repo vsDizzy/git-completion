@@ -9,7 +9,9 @@
     <OutputName>GitCompletion</OutputName>
     <AcceptEula>wix7</AcceptEula>
 
-    <ProductVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\VERSION').Trim())</ProductVersion>
+    <!-- The version is owned by Changesets and lives in package.json. -->
+    <PackageJson>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\package.json'))</PackageJson>
+    <ProductVersion>$([System.Text.RegularExpressions.Regex]::Match($(PackageJson), '"version"\s*:\s*"([^"]+)"').Groups[1].Value)</ProductVersion>
     <DefineConstants>ProductVersion=$(ProductVersion)</DefineConstants>
 
     <SuppressIces>ICE61;ICE91</SuppressIces>
